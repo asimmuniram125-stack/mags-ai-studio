@@ -83,6 +83,26 @@ export class UsersService {
     return this.buildUserResponse(user);
   }
 
+  async getUserProfile(id: string) {
+    const user = await this.findOne(id);
+    return user;
+  }
+
+  async updateUserProfile(id: string, updateProfileDto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updateProfileDto,
+    });
+  }
+
   async update(id: string, updateUserDto: UpdateUserDto) {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -113,10 +133,10 @@ export class UsersService {
   }
 
   private buildUserResponse(user: any) {
-    const roles = user.userRoles.map((ur: any) => ur.role.name);
+    const roles = user.userRoles?.map((ur: any) => ur.role.name) || [];
     const permissions = user.userRoles
-      .flatMap((ur: any) => ur.role.permissions)
-      .map((rp: any) => rp.permission.name);
+      ?.flatMap((ur: any) => ur.role.permissions)
+      ?.map((rp: any) => rp.permission.name) || [];
 
     return {
       id: user.id,

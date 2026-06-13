@@ -190,6 +190,48 @@ export class AuthService {
   }
 
   /**
+   * Refresh tokens
+   */
+  async refreshTokens(refreshToken: string): Promise<AuthResponseDto> {
+    try {
+      const payload = this.jwtService.verify(refreshToken) as any;
+      
+      if (payload.type !== 'refresh') {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        include: {
+          userRoles: {
+            include: {
+              role: {
+                include: {
+                  permissions: {
+                    include: {
+                      permission: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('User not found');
+      }
+
+      const { accessToken, refreshToken: newRefreshToken } = await this.generateTokens(user.id);
+
+      return this.buildAuthResponse(user, accessToken, newRefreshToken);
+    } catch (error) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+  }
+
+  /**
    * Get current user
    */
   async getCurrentUser(userId: string) {

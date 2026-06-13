@@ -66,6 +66,13 @@ export class RedisService implements OnModuleInit {
   /**
    * Delete a key
    */
+  async delete(key: string): Promise<void> {
+    await this.client.del(key);
+  }
+
+  /**
+   * Delete a key (alias for delete)
+   */
   async del(key: string): Promise<void> {
     await this.client.del(key);
   }

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AIProvider, CompletionOptions, AIResponse, AIStreamToken } from './ai-provider.interface';
 import fetch from 'node-fetch';
-import { encoding_for_model } from 'js-tiktoken';
+import { encodingForModel } from 'js-tiktoken';
 
 @Injectable()
 export class OpenAIProvider implements AIProvider {
@@ -18,8 +18,8 @@ export class OpenAIProvider implements AIProvider {
 
   async complete(options: CompletionOptions): Promise<AIResponse> {
     const messages = [
-      { role: 'system', content: options.systemPrompt || '' },
-      { role: 'user', content: options.prompt },
+      { role: 'system' as const, content: options.systemPrompt || '' },
+      { role: 'user' as const, content: options.messages[0]?.content || '' },
     ];
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -29,7 +29,7 @@ export class OpenAIProvider implements AIProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: options.model || this.defaultModel,
+        model: options.modelId || this.defaultModel,
         messages,
         temperature: options.temperature || 0.7,
         max_tokens: options.maxTokens || 2000,
@@ -43,16 +43,17 @@ export class OpenAIProvider implements AIProvider {
 
     const data = (await response.json()) as any;
     return {
-      text: data.choices[0].message.content,
+      content: data.choices[0].message.content,
       model: data.model,
       tokens: data.usage.total_tokens,
+      finishReason: data.choices[0].finish_reason,
     };
   }
 
   async *streamCompletion(options: CompletionOptions): AsyncGenerator<AIStreamToken> {
     const messages = [
-      { role: 'system', content: options.systemPrompt || '' },
-      { role: 'user', content: options.prompt },
+      { role: 'system' as const, content: options.systemPrompt || '' },
+      { role: 'user' as const, content: options.messages[0]?.content || '' },
     ];
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -62,7 +63,7 @@ export class OpenAIProvider implements AIProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: options.model || this.defaultModel,
+        model: options.modelId || this.defaultModel,
         messages,
         temperature: options.temperature || 0.7,
         max_tokens: options.maxTokens || 2000,
@@ -75,7 +76,8 @@ export class OpenAIProvider implements AIProvider {
       throw new Error(`OpenAI API error: ${response.statusText}`);
     }
 
-    const reader = response.body?.getReader();
+    // Handle ReadableStream for Node.js environment
+    const reader = (response.body as any)?.getReader?.() || (response.body as any)?.reader?.();
     if (!reader) return;
 
     const decoder = new TextDecoder();
@@ -99,7 +101,7 @@ export class OpenAIProvider implements AIProvider {
             if (json.choices[0].delta.content) {
               yield {
                 token: json.choices[0].delta.content,
-                model: json.model,
+                timestamp: Date.now(),
               };
             }
           } catch (e) {
@@ -114,7 +116,7 @@ export class OpenAIProvider implements AIProvider {
 
   estimateTokens(text: string): number {
     try {
-      const enc = encoding_for_model(this.defaultModel as any);
+      const enc = encodingForModel(this.defaultModel as any);
       return enc.encode(text).length;
     } catch {
       return Math.ceil(text.length / 4);

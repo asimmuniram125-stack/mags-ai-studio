@@ -3,10 +3,8 @@ import {
   Post,
   Get,
   Delete,
-  Patch,
   Param,
   Body,
-  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -83,7 +81,7 @@ export class AgentsController {
   /**
    * Get task details
    */
-  @Get(':id/tasks/:taskId')
+  @Get(':agentId/tasks/:taskId')
   async getTask(
     @Param('agentId') agentId: string,
     @Param('taskId') taskId: string,

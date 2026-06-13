@@ -3,6 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 @Injectable()
 export class BaseAgent {
   protected readonly logger = new Logger(BaseAgent.name);
+  protected aiService: any;
+  protected actions: any[] = [];
+
+  constructor() {}
 
   async execute(context: any): Promise<any> {
     try {
@@ -15,7 +19,7 @@ export class BaseAgent {
   }
 
   protected async executeSteps(steps: any[]): Promise<any[]> {
-    const results = [];
+    const results: any[] = [];
     for (let i = 0; i < steps.length; i++) {
       try {
         const result = await this.executeStep(steps[i]);
@@ -30,5 +34,9 @@ export class BaseAgent {
 
   protected async executeStep(step: any): Promise<any> {
     return step;
+  }
+
+  protected addAction(type: string, name: string, params: any, prompt: string): void {
+    this.actions.push({ type, name, params, prompt, timestamp: Date.now() });
   }
 }

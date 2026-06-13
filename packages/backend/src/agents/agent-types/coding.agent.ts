@@ -5,23 +5,23 @@ import { TaskExecutionContext } from '../interfaces/task.interface';
 
 @Injectable()
 export class CodingAgent extends BaseAgent {
-  constructor(aiService: AIService) {
-    super('coding-agent-1', 'Coding', aiService);
+  constructor(private aiService: AIService) {
+    super();
   }
 
-  protected async executeStep(context: TaskExecutionContext, step: any): Promise<any> {
+  protected async executeStep(step: any): Promise<any> {
     if (step.type === 'write_code') {
-      return await this.writeCode(context, step);
+      return await this.writeCode(step);
     } else if (step.type === 'analyze_code') {
-      return await this.analyzeCode(context, step);
+      return await this.analyzeCode(step);
     } else if (step.type === 'refactor_code') {
-      return await this.refactorCode(context, step);
+      return await this.refactorCode(step);
     }
 
-    return super.executeStep(context, step);
+    return super.executeStep(step);
   }
 
-  private async writeCode(context: TaskExecutionContext, step: any): Promise<any> {
+  private async writeCode(step: any): Promise<any> {
     const prompt = `
       Write ${step.language || 'JavaScript'} code for:
       ${step.description}
@@ -51,7 +51,7 @@ export class CodingAgent extends BaseAgent {
     };
   }
 
-  private async analyzeCode(context: TaskExecutionContext, step: any): Promise<any> {
+  private async analyzeCode(step: any): Promise<any> {
     const prompt = `
       Analyze this code:
       ${step.code}
@@ -76,7 +76,7 @@ export class CodingAgent extends BaseAgent {
     };
   }
 
-  private async refactorCode(context: TaskExecutionContext, step: any): Promise<any> {
+  private async refactorCode(step: any): Promise<any> {
     const prompt = `
       Refactor this code:
       ${step.code}

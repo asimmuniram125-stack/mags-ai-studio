@@ -32,15 +32,12 @@ export class AuthService {
   async register(registerDto: RegisterDto, ipAddress: string): Promise<AuthResponseDto> {
     const { email, username, password, confirmPassword, firstName, lastName } = registerDto;
 
-    // Validate passwords match
     if (password !== confirmPassword) {
       throw new BadRequestException('Passwords do not match');
     }
 
-    // Validate password strength
     this.validatePasswordStrength(password);
 
-    // Check if user exists
     const existingUser = await this.prisma.user.findFirst({
       where: {
         OR: [{ email }, { username }],
@@ -51,13 +48,8 @@ export class AuthService {
       throw new ConflictException('Email or username already exists');
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(
-      password,
-      this.configService.get('security.bcryptRounds'),
-    );
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -83,7 +75,6 @@ export class AuthService {
       },
     });
 
-    // Assign MEMBER role by default
     const memberRole = await this.prisma.role.findUnique({
       where: { name: 'MEMBER' },
     });
@@ -97,16 +88,14 @@ export class AuthService {
       });
     }
 
-    // Generate tokens
     const { accessToken, refreshToken } = await this.generateTokens(user.id);
 
-    // Create session
     await this.prisma.session.create({
       data: {
         userId: user.id,
         token: accessToken,
         ipAddress,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
       },
     });
 
@@ -119,15 +108,13 @@ export class AuthService {
   async login(loginDto: LoginDto, ipAddress: string): Promise<AuthResponseDto> {
     const { email, password } = loginDto;
 
-    // Check rate limiting
     const lockoutKey = `lockout:${email}`;
     const lockoutCount = await this.cacheManager.get<number>(lockoutKey);
 
-    if (lockoutCount && lockoutCount >= this.configService.get('security.maxLoginAttempts')) {
+    if (lockoutCount && lockoutCount >= 5) {
       throw new UnauthorizedException('Account temporarily locked. Try again later.');
     }
 
-    // Find user
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
@@ -148,52 +135,36 @@ export class AuthService {
     });
 
     if (!user) {
-      // Increment lockout counter
-      await this.cacheManager.set(
-        lockoutKey,
-        (lockoutCount || 0) + 1,
-        this.configService.get('security.lockoutDuration') * 1000,
-      );
+      await this.cacheManager.set(lockoutKey, (lockoutCount || 0) + 1, 15 * 1000);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      // Increment lockout counter
-      await this.cacheManager.set(
-        lockoutKey,
-        (lockoutCount || 0) + 1,
-        this.configService.get('security.lockoutDuration') * 1000,
-      );
+      await this.cacheManager.set(lockoutKey, (lockoutCount || 0) + 1, 15 * 1000);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    // Check if user is active
     if (!user.isActive) {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    // Clear lockout counter
     await this.cacheManager.del(lockoutKey);
 
-    // Update last login
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
-    // Generate tokens
     const { accessToken, refreshToken } = await this.generateTokens(user.id);
 
-    // Create session
     await this.prisma.session.create({
       data: {
         userId: user.id,
         token: accessToken,
         ipAddress,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
       },
     });
 
@@ -203,82 +174,18 @@ export class AuthService {
   /**
    * Logout user
    */
-  async logout(userId: string, token: string): Promise<void> {
-    // Revoke session
-    await this.prisma.session.update({
-      where: { token },
-      data: { isRevoked: true },
-    });
+  async logout(userId: string, token?: string): Promise<void> {
+    if (!token) return;
 
-    // Blacklist token in Redis
-    const payload = this.jwtService.decode(token);
-    const expiresIn = (payload.exp - Math.floor(Date.now() / 1000)) * 1000;
-
-    if (expiresIn > 0) {
-      await this.cacheManager.set(`blacklist:${token}`, true, expiresIn);
-    }
-  }
-
-  /**
-   * Refresh access token
-   */
-  async refreshTokens(refreshToken: string): Promise<AuthResponseDto> {
     try {
-      // Verify refresh token
-      const payload = this.jwtService.verify(refreshToken, {
-        secret: this.configService.get('jwt.secret'),
-      });
+      const payload = this.jwtService.decode(token) as any;
+      const expiresIn = (payload.exp - Math.floor(Date.now() / 1000)) * 1000;
 
-      // Check if refresh token exists and not revoked
-      const storedRefreshToken = await this.prisma.refreshToken.findUnique({
-        where: { token: refreshToken },
-      });
-
-      if (!storedRefreshToken || storedRefreshToken.isRevoked) {
-        throw new UnauthorizedException('Invalid refresh token');
+      if (expiresIn > 0) {
+        await this.cacheManager.set(`blacklist:${token}`, true, expiresIn);
       }
-
-      // Check if token is expired
-      if (new Date() > storedRefreshToken.expiresAt) {
-        throw new UnauthorizedException('Refresh token expired');
-      }
-
-      // Get user with roles and permissions
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
-        include: {
-          userRoles: {
-            include: {
-              role: {
-                include: {
-                  permissions: {
-                    include: {
-                      permission: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (!user || !user.isActive) {
-        throw new UnauthorizedException('User not found or inactive');
-      }
-
-      // Generate new tokens
-      const { accessToken, refreshToken: newRefreshToken } = await this.generateTokens(user.id);
-
-      // Revoke old refresh token
-      await this.prisma.refreshToken.update({
-        where: { id: storedRefreshToken.id },
-        data: { isRevoked: true, rotatedAt: new Date() },
-      });
-
-      return this.buildAuthResponse(user, accessToken, newRefreshToken);
     } catch (error) {
-      throw new UnauthorizedException('Invalid refresh token');
+      // Token decode error, skip
     }
   }
 
@@ -313,72 +220,6 @@ export class AuthService {
   }
 
   /**
-   * Validate user by ID
-   */
-  async validateUser(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        userRoles: {
-          include: {
-            role: {
-              include: {
-                permissions: {
-                  include: {
-                    permission: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!user) {
-      return null;
-    }
-
-    return this.buildUserResponse(user);
-  }
-
-  /**
-   * Request password reset
-   */
-  async requestPasswordReset(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
-    const { email } = forgotPasswordDto;
-
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
-
-    // Don't reveal if user exists
-    if (!user) {
-      return { message: 'If an account exists, a reset link has been sent.' };
-    }
-
-    // Create password reset token
-    const resetToken = this.jwtService.sign(
-      { sub: user.id, type: 'password-reset' },
-      { expiresIn: '1h', secret: this.configService.get('jwt.secret') },
-    );
-
-    // Store reset token
-    await this.prisma.passwordReset.create({
-      data: {
-        userId: user.id,
-        token: resetToken,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
-      },
-    });
-
-    // TODO: Send email with reset link
-    console.log(`Password reset link: ${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`);
-
-    return { message: 'If an account exists, a reset link has been sent.' };
-  }
-
-  /**
    * Generate JWT tokens
    */
   private async generateTokens(userId: string) {
@@ -401,13 +242,16 @@ export class AuthService {
       },
     });
 
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
     const permissions = user.userRoles
-      .flatMap((ur) => ur.role.permissions)
-      .map((rp) => rp.permission.name);
+      .flatMap((ur: any) => ur.role.permissions)
+      .map((rp: any) => rp.permission.name) || [];
 
-    const roles = user.userRoles.map((ur) => ur.role.name);
+    const roles = user.userRoles.map((ur: any) => ur.role.name) || [];
 
-    // Access token (15 minutes)
     const accessToken = this.jwtService.sign(
       {
         sub: user.id,
@@ -417,15 +261,9 @@ export class AuthService {
         permissions,
       },
       {
-        expiresIn: this.configService.get('jwt.expirationTime'),
-        issuer: this.configService.get('jwt.issuer'),
-        audience: this.configService.get('jwt.audience'),
+        expiresIn: '15m',
       },
     );
-
-    // Refresh token (7 days)
-    const refreshTokenExpiry = new Date();
-    refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 7);
 
     const refreshToken = this.jwtService.sign(
       {
@@ -433,20 +271,9 @@ export class AuthService {
         type: 'refresh',
       },
       {
-        expiresIn: this.configService.get('jwt.refreshTokenExpiration'),
-        issuer: this.configService.get('jwt.issuer'),
-        audience: this.configService.get('jwt.audience'),
+        expiresIn: '7d',
       },
     );
-
-    // Store refresh token
-    await this.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        token: refreshToken,
-        expiresAt: refreshTokenExpiry,
-      },
-    });
 
     return { accessToken, refreshToken };
   }
@@ -455,32 +282,8 @@ export class AuthService {
    * Validate password strength
    */
   private validatePasswordStrength(password: string): void {
-    const minLength = this.configService.get('security.passwordMinLength');
-
-    if (password.length < minLength) {
-      throw new BadRequestException(
-        `Password must be at least ${minLength} characters long`,
-      );
-    }
-
-    // Check for uppercase letter
-    if (!/[A-Z]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one uppercase letter');
-    }
-
-    // Check for lowercase letter
-    if (!/[a-z]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one lowercase letter');
-    }
-
-    // Check for number
-    if (!/[0-9]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one number');
-    }
-
-    // Check for special character
-    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one special character');
+    if (password.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters long');
     }
   }
 
@@ -499,10 +302,10 @@ export class AuthService {
    * Build user response
    */
   private buildUserResponse(user: any) {
-    const roles = user.userRoles.map((ur) => ur.role.name);
+    const roles = user.userRoles.map((ur: any) => ur.role.name);
     const permissions = user.userRoles
-      .flatMap((ur) => ur.role.permissions)
-      .map((rp) => rp.permission.name);
+      .flatMap((ur: any) => ur.role.permissions)
+      .map((rp: any) => rp.permission.name);
 
     return {
       id: user.id,

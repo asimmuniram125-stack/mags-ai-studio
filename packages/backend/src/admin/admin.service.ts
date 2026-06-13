@@ -27,7 +27,7 @@ export class AdminService {
     ]);
 
     return {
-      data: users.map((user) => this.buildUserResponse(user)),
+      data: users.map((user: any) => this.buildUserResponse(user)),
       total,
       skip,
       take,
@@ -74,7 +74,6 @@ export class AdminService {
   async updateUserRole(userId: string, updateUserRoleDto: UpdateUserRoleDto) {
     const { roleId } = updateUserRoleDto;
 
-    // Check if user exists
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -83,7 +82,6 @@ export class AdminService {
       throw new NotFoundException('User not found');
     }
 
-    // Check if role exists
     const role = await this.prisma.role.findUnique({
       where: { id: roleId },
     });
@@ -92,7 +90,6 @@ export class AdminService {
       throw new NotFoundException('Role not found');
     }
 
-    // Remove all existing roles and assign new one
     await this.prisma.userRole.deleteMany({
       where: { userId },
     });
@@ -130,13 +127,12 @@ export class AdminService {
       throw new NotFoundException('User not found');
     }
 
-    // Prevent deactivating super admins
     const userRoles = await this.prisma.userRole.findMany({
       where: { userId },
       include: { role: true },
     });
 
-    if (userRoles.some((ur) => ur.role.name === 'SUPER_ADMIN')) {
+    if (userRoles.some((ur: any) => ur.role.name === 'SUPER_ADMIN')) {
       throw new ForbiddenException('Cannot deactivate SUPER_ADMIN users');
     }
 
@@ -145,14 +141,11 @@ export class AdminService {
       data: { isActive: false },
     });
 
-    // Log audit
     await this.prisma.auditLog.create({
       data: {
         userId: adminId,
         action: 'DEACTIVATE_USER',
-        resourceType: 'USER',
-        resourceId: userId,
-        status: 'SUCCESS',
+        resource: 'USER',
       },
     });
 
@@ -176,14 +169,11 @@ export class AdminService {
       data: { isActive: true },
     });
 
-    // Log audit
     await this.prisma.auditLog.create({
       data: {
         userId: adminId,
         action: 'ACTIVATE_USER',
-        resourceType: 'USER',
-        resourceId: userId,
-        status: 'SUCCESS',
+        resource: 'USER',
       },
     });
 
@@ -218,10 +208,10 @@ export class AdminService {
    * Build user response
    */
   private buildUserResponse(user: any) {
-    const roles = user.userRoles.map((ur) => ur.role.name);
+    const roles = user.userRoles.map((ur: any) => ur.role.name);
     const permissions = user.userRoles
-      .flatMap((ur) => ur.role.permissions)
-      .map((rp) => rp.permission.name);
+      .flatMap((ur: any) => ur.role.permissions)
+      .map((rp: any) => rp.permission.name);
 
     return {
       id: user.id,

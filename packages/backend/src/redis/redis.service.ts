@@ -1,130 +1,72 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, RedisClientType } from 'redis';
 
 @Injectable()
-export class RedisService {
+export class RedisService implements OnModuleInit {
   private client: RedisClientType;
   private readonly logger = new Logger(RedisService.name);
 
-  constructor(private configService: ConfigService) {
-    this.initializeRedis();
-  }
+  constructor(private configService: ConfigService) {}
 
-  /**
-   * Initialize Redis client
-   */
-  private async initializeRedis() {
-    const host = this.configService.get('redis.host');
-    const port = this.configService.get('redis.port');
+  async onModuleInit() {
+    const host = this.configService.get('redis.host') || 'localhost';
+    const port = this.configService.get('redis.port') || 6379;
     const password = this.configService.get('redis.password');
 
     this.client = createClient({
-      host,
-      port,
-      password,
-      socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 50, 500),
-      },
-    });
-
-    this.client.on('error', (err) => {
-      this.logger.error('Redis error:', err);
-    });
-
-    this.client.on('connect', () => {
-      this.logger.log('Redis connected');
+      url: password
+        ? `redis://:${password}@${host}:${port}`
+        : `redis://${host}:${port}`,
     });
 
     await this.client.connect();
+    this.logger.log('Redis connected');
   }
 
   /**
-   * Get value
+   * Set a key-value pair
    */
-  async get(key: string): Promise<string | null> {
-    return this.client.get(key);
-  }
-
-  /**
-   * Get JSON value
-   */
-  async getJSON(key: string): Promise<any> {
-    const value = await this.get(key);
-    return value ? JSON.parse(value) : null;
-  }
-
-  /**
-   * Set value
-   */
-  async set(key: string, value: string, ttl?: number): Promise<void> {
-    if (ttl) {
-      await this.client.setEx(key, ttl, value);
+  async set(key: string, value: string, exSeconds?: number): Promise<void> {
+    if (exSeconds) {
+      await this.client.setEx(key, exSeconds, value);
     } else {
       await this.client.set(key, value);
     }
   }
 
   /**
-   * Set JSON value
+   * Get a value by key
    */
-  async setJSON(key: string, value: any, ttl?: number): Promise<void> {
-    await this.set(key, JSON.stringify(value), ttl);
+  async get(key: string): Promise<string | null> {
+    return this.client.get(key);
   }
 
   /**
-   * Delete key
+   * Set JSON
    */
-  async delete(key: string): Promise<void> {
+  async setJSON(key: string, value: any, exSeconds?: number): Promise<void> {
+    const jsonString = JSON.stringify(value);
+    await this.set(key, jsonString, exSeconds);
+  }
+
+  /**
+   * Get JSON
+   */
+  async getJSON(key: string): Promise<any> {
+    const value = await this.get(key);
+    if (!value) return null;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Delete a key
+   */
+  async del(key: string): Promise<void> {
     await this.client.del(key);
-  }
-
-  /**
-   * Add to set
-   */
-  async addToSet(key: string, value: string): Promise<void> {
-    await this.client.sAdd(key, value);
-  }
-
-  /**
-   * Get set members
-   */
-  async getSet(key: string): Promise<string[]> {
-    return this.client.sMembers(key);
-  }
-
-  /**
-   * Check if member in set
-   */
-  async isMemberOfSet(key: string, value: string): Promise<boolean> {
-    return this.client.sIsMember(key, value);
-  }
-
-  /**
-   * Push to list
-   */
-  async pushToList(key: string, value: string): Promise<void> {
-    await this.client.rPush(key, value);
-  }
-
-  /**
-   * Get list range
-   */
-  async getListRange(key: string, start: number, stop: number): Promise<string[]> {
-    return this.client.lRange(key, start, stop);
-  }
-
-  /**
-   * Increment counter
-   */
-  async increment(key: string, amount: number = 1): Promise<number> {
-    return this.client.incrBy(key, amount);
-  }
-
-  /**
-   * Flush all (use with caution)
-   */
-  async flushAll(): Promise<void> {
-    await this.client.flushDb();
   }
 }

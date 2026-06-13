@@ -8,9 +8,8 @@ datasource db {
 }
 
 // ============================================================================
-// PHASES 1-4: Previous models (User, Role, Chat, etc.)
+// PHASE 1: User & Authentication Models
 // ============================================================================
-// (All existing models from Phases 1-4 remain unchanged)
 
 model User {
   id            String        @id @default(cuid())
@@ -28,18 +27,14 @@ model User {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  // Relations - Phase 3
+  // Relations
   userRoles      UserRole[]    @relation("UserRoles")
   sessions       Session[]     @relation("UserSessions")
   refreshTokens  RefreshToken[] @relation("UserRefreshTokens")
   auditLogs      AuditLog[]    @relation("UserAuditLogs")
   passwordResets PasswordReset[] @relation("UserPasswordResets")
-
-  // Relations - Phase 4
   chats          Chat[]        @relation("UserChats")
   chatMessages   ChatMessage[] @relation("UserChatMessages")
-
-  // Relations - Phase 5
   agents         Agent[]       @relation("UserAgents")
   tasks          AgentTask[]   @relation("UserTasks")
   workflows      AgentWorkflow[] @relation("UserWorkflows")
@@ -51,7 +46,125 @@ model User {
   @@map("users")
 }
 
-// (Previous models: Role, Permission, UserRole, RolePermission, Session, RefreshToken, etc.)
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userRoles   UserRole[] @relation("RoleUsers")
+  permissions RolePermission[] @relation("RolePermissions")
+
+  @@index([name])
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  category    String   @db.VarChar(50) @default("general")
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[] @relation("PermissionRoles")
+
+  @@index([name])
+  @@index([category])
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  assignedAt DateTime @default(now())
+
+  user      User     @relation("UserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation("RoleUsers", fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id        String   @id @default(cuid())
+  roleId    String
+  permissionId String
+  assignedAt DateTime @default(now())
+
+  role       Role       @relation("RolePermissions", fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation("PermissionRoles", fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@map("role_permissions")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  token        String   @unique @db.Text
+  ipAddress    String?  @db.VarChar(45)
+  userAgent    String?  @db.Text
+  isActive     Boolean  @default(true)
+  lastActivityAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  user         User     @relation("UserSessions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique @db.Text
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation("UserRefreshTokens", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique @db.Text
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation("UserPasswordResets", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   @db.VarChar(255)
+  resource  String   @db.VarChar(100)
+  details   Json?
+  ipAddress String?  @db.VarChar(45)
+  createdAt DateTime @default(now())
+
+  user      User     @relation("UserAuditLogs", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
 
 // ============================================================================
 // PHASE 4: Chat System Models
@@ -80,8 +193,6 @@ model Chat {
   user         User          @relation("UserChats", fields: [userId], references: [id], onDelete: Cascade)
   messages     ChatMessage[] @relation("ChatMessages")
   sessions     ChatSession[] @relation("ChatSessions")
-
-  // Relations - Phase 5
   agentAccess  AgentChatAccess[] @relation("ChatAgentAccess")
 
   @@index([userId])
@@ -153,7 +264,7 @@ model AIModelConfig {
 }
 
 // ============================================================================
-// PHASE 5: Agent System Models (NEW)
+// PHASE 5: Agent System Models
 // ============================================================================
 
 model Agent {
@@ -161,37 +272,31 @@ model Agent {
   userId       String
   name         String   @db.VarChar(255)
   description  String?  @db.Text
-  type         String   @db.VarChar(50) // "coding", "research", "data_analyst", etc.
+  type         String   @db.VarChar(50)
   
-  // Agent configuration
   modelId      String   @default("gpt-4")
-  systemPrompt String   @db.Text // Role-specific prompt
+  systemPrompt String   @db.Text
   temperature  Float    @default(0.7)
   maxTokens    Int      @default(4000)
   topP         Float    @default(1.0)
   
-  // Capabilities
-  tools        String[] @default([]) // Tool IDs this agent can use
-  permissions  String[] @default([]) // Custom permissions
+  tools        String[] @default([])
+  permissions  String[] @default([])
   
-  // Status
   isActive     Boolean  @default(true)
   isPublic     Boolean  @default(false)
   
-  // Usage tracking
   taskCount    Int      @default(0)
   totalTokens  Int      @default(0)
-  successRate  Float    @default(0.0) // Percentage of successful tasks
+  successRate  Float    @default(0.0)
   
-  // Metadata
   avatar       String?  @db.Text
-  color        String?  @db.VarChar(7) // Hex color
+  color        String?  @db.VarChar(7)
   tags         String[] @default([])
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Relations
   user         User           @relation("UserAgents", fields: [userId], references: [id], onDelete: Cascade)
   tasks        AgentTask[]    @relation("AgentTasks")
   memories     AgentMemory[]  @relation("AgentMemories")
@@ -209,41 +314,34 @@ model Agent {
 model AgentTask {
   id           String   @id @default(cuid())
   userId       String
-  agentId      String?  // NULL if multi-agent or workflow-based
+  agentId      String?
   
   title        String   @db.VarChar(255)
   description  String?  @db.Text
-  goal         String   @db.Text // What the agent needs to accomplish
+  goal         String   @db.Text
   
-  // Task inputs
-  input        Json?    // Input parameters
-  context      String?  @db.Text // Additional context for the agent
+  input        Json?
+  context      String?  @db.Text
   
-  // Task status
-  status       String   @db.VarChar(50) @default("pending") // pending, running, completed, failed
-  priority     String   @db.VarChar(20) @default("medium") // low, medium, high
+  status       String   @db.VarChar(50) @default("pending")
+  priority     String   @db.VarChar(20) @default("medium")
   
-  // Execution tracking
   startedAt    DateTime?
   completedAt  DateTime?
   durationMs   Int?
   
-  // Results
-  result       Json?    // Task output/result
-  error        String?  @db.Text // Error message if failed
+  result       Json?
+  error        String?  @db.Text
   
-  // Subtasks
-  subtasks     String[] @default([]) // IDs of subtasks created by agent
-  parentTaskId String?  // If this is a subtask
+  subtasks     String[] @default([])
+  parentTaskId String?
   
-  // Metadata
   metadata     Json?
   retryCount   Int      @default(0)
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Relations
   user         User     @relation("UserTasks", fields: [userId], references: [id], onDelete: Cascade)
   agent        Agent?   @relation("AgentTasks", fields: [agentId], references: [id], onDelete: SetNull)
   parentTask   AgentTask? @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
@@ -263,27 +361,22 @@ model AgentMemory {
   userId       String
   agentId      String
   
-  // Memory types
-  type         String   @db.VarChar(50) // "short_term", "long_term", "session"
+  type         String   @db.VarChar(50)
   
-  // Content
   content      String   @db.Text
-  embedding    Float[]? // Vector embedding for similarity search
+  embedding    String?  @db.Text
   
-  // Memory metadata
-  relevance    Float    @default(1.0) // How relevant this memory is (0-1)
-  accessCount  Int      @default(0) // How many times accessed
+  relevance    Float    @default(1.0)
+  accessCount  Int      @default(0)
   lastAccessedAt DateTime?
-  expiresAt    DateTime? // When memory expires (for short-term)
+  expiresAt    DateTime?
   
-  // Linkages
-  linkedTaskId String?  // Task this memory is related to
-  linkedChatId String?  // Chat this memory is related to
+  linkedTaskId String?
+  linkedChatId String?
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Relations
   user         User     @relation("UserMemories", fields: [userId], references: [id], onDelete: Cascade)
   agent        Agent    @relation("AgentMemories", fields: [agentId], references: [id], onDelete: Cascade)
 
@@ -302,23 +395,19 @@ model AgentWorkflow {
   name         String   @db.VarChar(255)
   description  String?  @db.Text
   
-  // Workflow definition (DAG)
-  nodes        Json     // Array of workflow nodes
-  edges        Json     // Array of connections between nodes
-  config       Json?    // Workflow execution config
+  nodes        Json
+  edges        Json
+  config       Json?
   
-  // Status
   isActive     Boolean  @default(true)
   isDraft      Boolean  @default(true)
   
-  // Execution tracking
   executionCount Int    @default(0)
   lastExecutedAt DateTime?
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Relations
   user         User     @relation("UserWorkflows", fields: [userId], references: [id], onDelete: Cascade)
   agents       Agent[]  @relation("WorkflowAgents")
   executions   AgentWorkflowExecution[] @relation("WorkflowExecutions")
@@ -333,21 +422,17 @@ model AgentWorkflowExecution {
   id           String   @id @default(cuid())
   workflowId   String
   
-  // Execution status
-  status       String   @db.VarChar(50) @default("running") // running, completed, failed
+  status       String   @db.VarChar(50) @default("running")
   
-  // Results
-  result       Json?    // Final workflow result
+  result       Json?
   error        String?  @db.Text
   
-  // Tracking
   startedAt    DateTime @default(now())
   completedAt  DateTime?
   durationMs   Int?
   
   createdAt    DateTime @default(now())
 
-  // Relations
   workflow     AgentWorkflow @relation("WorkflowExecutions", fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId])
@@ -360,21 +445,17 @@ model AgentExecutionLog {
   agentId      String
   taskId       String?
   
-  // Log content
-  level        String   @db.VarChar(20) // "info", "debug", "warning", "error"
+  level        String   @db.VarChar(20)
   message      String   @db.Text
   
-  // Execution context
-  reasoning    String?  @db.Text // Agent's internal reasoning
+  reasoning    String?  @db.Text
   toolsUsed    String[] @default([])
   
-  // Data
   input        Json?
   output       Json?
   
   createdAt    DateTime @default(now())
 
-  // Relations
   agent        Agent    @relation("AgentLogs", fields: [agentId], references: [id], onDelete: Cascade)
   task         AgentTask? @relation("TaskLogs", fields: [taskId], references: [id], onDelete: SetNull)
 
@@ -390,16 +471,13 @@ model AgentChatAccess {
   agentId      String
   chatId       String
   
-  // Access metadata
   accessedAt   DateTime @default(now())
   lastUsedAt   DateTime?
   
-  // Permissions for this chat
   canRead      Boolean  @default(true)
   canWrite     Boolean  @default(true)
   canExecute   Boolean  @default(true)
 
-  // Relations
   agent        Agent    @relation("AgentChatAccess", fields: [agentId], references: [id], onDelete: Cascade)
   chat         Chat     @relation("ChatAgentAccess", fields: [chatId], references: [id], onDelete: Cascade)
 

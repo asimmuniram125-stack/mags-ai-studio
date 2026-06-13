@@ -1,22 +1,64 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
-import { UpdateProfileDto } from './dto/update-profile.dto';
 import * as bcrypt from 'bcrypt';
-import { ConfigService } from '@nestjs/config';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    private prisma: PrismaService,
-    private configService: ConfigService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
-  /**
-   * Get user profile
-   */
-  async getUserProfile(userId: string) {
+  async create(createUserDto: CreateUserDto) {
+    const { email, username, password, firstName, lastName } = createUserDto;
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email }, { username }],
+      },
+    });
+
+    if (existingUser) {
+      throw new BadRequestException('Email or username already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    return this.prisma.user.create({
+      data: {
+        email,
+        username,
+        password: hashedPassword,
+        firstName,
+        lastName,
+      },
+    });
+  }
+
+  async findAll(skip: number = 0, take: number = 10) {
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        skip,
+        take,
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          firstName: true,
+          lastName: true,
+          avatar: true,
+          isActive: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.user.count(),
+    ]);
+
+    return { users, total };
+  }
+
+  async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id },
       include: {
         userRoles: {
           include: {
@@ -41,89 +83,40 @@ export class UsersService {
     return this.buildUserResponse(user);
   }
 
-  /**
-   * Update user profile
-   */
-  async updateUserProfile(userId: string, updateProfileDto: UpdateProfileDto) {
-    const { firstName, lastName, avatar, bio, phone, password } = updateProfileDto;
-
-    const updateData: any = {
-      firstName,
-      lastName,
-      avatar,
-      bio,
-      phone,
-    };
-
-    // If password is provided, hash it
-    if (password) {
-      this.validatePasswordStrength(password);
-      updateData.password = await bcrypt.hash(
-        password,
-        this.configService.get('security.bcryptRounds'),
-      );
-    }
-
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      include: {
-        userRoles: {
-          include: {
-            role: {
-              include: {
-                permissions: {
-                  include: {
-                    permission: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+  async update(id: string, updateUserDto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
     });
 
-    return this.buildUserResponse(user);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updateUserDto,
+    });
   }
 
-  /**
-   * Validate password strength
-   */
-  private validatePasswordStrength(password: string): void {
-    const minLength = this.configService.get('security.passwordMinLength');
+  async delete(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
 
-    if (password.length < minLength) {
-      throw new BadRequestException(
-        `Password must be at least ${minLength} characters long`,
-      );
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    if (!/[A-Z]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one uppercase letter');
-    }
-
-    if (!/[a-z]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one lowercase letter');
-    }
-
-    if (!/[0-9]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one number');
-    }
-
-    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-      throw new BadRequestException('Password must contain at least one special character');
-    }
+    return this.prisma.user.delete({
+      where: { id },
+    });
   }
 
-  /**
-   * Build user response
-   */
   private buildUserResponse(user: any) {
-    const roles = user.userRoles.map((ur) => ur.role.name);
+    const roles = user.userRoles.map((ur: any) => ur.role.name);
     const permissions = user.userRoles
-      .flatMap((ur) => ur.role.permissions)
-      .map((rp) => rp.permission.name);
+      .flatMap((ur: any) => ur.role.permissions)
+      .map((rp: any) => rp.permission.name);
 
     return {
       id: user.id,
@@ -132,15 +125,10 @@ export class UsersService {
       firstName: user.firstName,
       lastName: user.lastName,
       avatar: user.avatar,
-      bio: user.bio,
-      phone: user.phone,
       roles,
       permissions,
-      emailVerified: user.emailVerified,
       isActive: user.isActive,
-      lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
     };
   }
 }

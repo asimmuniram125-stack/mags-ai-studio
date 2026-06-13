@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AIProvider } from './providers/ai-provider.interface';
 import { OpenAIProvider } from './providers/openai.provider';
@@ -45,8 +45,8 @@ export class AIService {
   /**
    * Stream completion response
    */
-  async streamCompletion(options: CompletionOptions): AsyncIterable<AIStreamToken> {
-    return this.provider.streamCompletion(options);
+  async *streamCompletion(options: CompletionOptions): AsyncGenerator<AIStreamToken> {
+    yield* this.provider.streamCompletion(options);
   }
 
   /**

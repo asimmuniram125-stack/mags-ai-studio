@@ -1,0 +1,389 @@
+// This file already exists, but here's the DevOps schema additions
+// Add these models to your existing schema.prisma
+
+model Deployment {
+  id                    String                @id @default(cuid())
+  projectId             String
+  project               Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  name                  String
+  description           String?
+  version               String
+  
+  status                DeploymentStatus      @default(PENDING)
+  environment           Environment           @default(STAGING)
+  
+  appId                 String?
+  generatedApp          GeneratedApp?         @relation(fields: [appId], references: [id])
+  
+  pipelineId            String?
+  pipeline              DeploymentPipeline?   @relation(fields: [pipelineId], references: [id])
+  
+  targetType            DeploymentTarget      @default(DOCKER)
+  targetConfig          Json                  // Dynamic config based on target type
+  
+  deploymentSteps       DeploymentStep[]
+  jobs                  BuildJob[]
+  
+  startedAt             DateTime?
+  completedAt           DateTime?
+  failedAt              DateTime?
+  
+  // Rollback info
+  previousDeploymentId  String?
+  canRollback           Boolean               @default(true)
+  
+  // Monitoring
+  healthCheckInterval   Int                   @default(300000) // 5 minutes
+  lastHealthCheckAt     DateTime?
+  healthStatus          HealthStatus          @default(UNKNOWN)
+  
+  logs                  DeploymentLog[]
+  metrics               DeploymentMetric[]
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  createdBy             String
+  
+  @@index([projectId])
+  @@index([status])
+  @@index([environment])
+}
+
+model DeploymentPipeline {
+  id                    String                @id @default(cuid())
+  projectId             String
+  project               Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  name                  String
+  description           String?
+  
+  stages                PipelineStage[]
+  
+  isActive              Boolean               @default(true)
+  isDefault             Boolean               @default(false)
+  
+  deployments           Deployment[]
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  
+  @@index([projectId])
+}
+
+model PipelineStage {
+  id                    String                @id @default(cuid())
+  pipelineId            String
+  pipeline              DeploymentPipeline    @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  
+  name                  String
+  description           String?
+  order                 Int
+  
+  type                  StageType
+  config                Json                  // Stage-specific config
+  
+  timeout               Int                   @default(3600000) // 1 hour
+  retryCount            Int                   @default(0)
+  skipOnFailure         Boolean               @default(false)
+  
+  conditions            String?               // Conditional execution
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  
+  @@index([pipelineId])
+  @@unique([pipelineId, order])
+}
+
+model DeploymentStep {
+  id                    String                @id @default(cuid())
+  deploymentId          String
+  deployment            Deployment            @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  
+  stageId               String?
+  stageName             String
+  
+  status                StepStatus            @default(PENDING)
+  
+  startedAt             DateTime?
+  completedAt           DateTime?
+  duration              Int?                  // milliseconds
+  
+  logs                  String?               // First 10MB of logs
+  error                 String?
+  
+  output                Json?
+  
+  @@index([deploymentId])
+  @@index([status])
+}
+
+model BuildJob {
+  id                    String                @id @default(cuid())
+  deploymentId          String?
+  deployment            Deployment?           @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
+  
+  appId                 String?
+  generatedApp          GeneratedApp?         @relation(fields: [appId], references: [id])
+  
+  name                  String
+  
+  buildType             BuildType             @default(DOCKER)
+  status                BuildStatus           @default(PENDING)
+  
+  artifacts             BuildArtifact[]
+  
+  startedAt             DateTime?
+  completedAt           DateTime?
+  duration              Int?
+  
+  // Build context
+  sourceUrl             String                // Git URL or artifact source
+  branch                String                @default("main")
+  commitSha             String?
+  
+  buildConfig           Json                  // Build-specific config
+  environment           Json                  // Build-time env vars
+  
+  logs                  DeploymentLog[]
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  
+  @@index([deploymentId])
+  @@index([appId])
+  @@index([status])
+}
+
+model BuildArtifact {
+  id                    String                @id @default(cuid())
+  jobId                 String
+  job                   BuildJob              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
+  name                  String
+  type                  ArtifactType          // DOCKER_IMAGE, BINARY, etc.
+  size                  BigInt                // bytes
+  
+  location              String                // S3 path, Docker registry, etc.
+  checksum              String                // SHA256
+  
+  metadata              Json?
+  
+  createdAt             DateTime              @default(now())
+  
+  @@index([jobId])
+  @@index([type])
+}
+
+model EnvironmentConfig {
+  id                    String                @id @default(cuid())
+  projectId             String
+  project               Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  environment           Environment
+  
+  variables             EnvironmentVariable[]
+  secrets               EnvironmentSecret[]
+  
+  description           String?
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  
+  @@unique([projectId, environment])
+  @@index([projectId])
+}
+
+model EnvironmentVariable {
+  id                    String                @id @default(cuid())
+  configId              String
+  config                EnvironmentConfig     @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  key                   String
+  value                 String
+  
+  isEncrypted           Boolean               @default(false)
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  
+  @@unique([configId, key])
+  @@index([configId])
+}
+
+model EnvironmentSecret {
+  id                    String                @id @default(cuid())
+  configId              String
+  config                EnvironmentConfig     @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  key                   String
+  encryptedValue        String                // Encrypted with app key
+  
+  metadata              Json?                 // IV, salt, etc.
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  auditLog              String?               // Who accessed when
+  
+  @@unique([configId, key])
+  @@index([configId])
+}
+
+model InfrastructureTemplate {
+  id                    String                @id @default(cuid())
+  
+  name                  String
+  description           String?
+  
+  type                  InfraType             // NODE, NEXTJS, NESTJS, etc.
+  targetType            DeploymentTarget      // VPS, DOCKER, K8S, etc.
+  
+  config                Json                  // Template config
+  
+  // For K8s
+  kubernetesManifest    String?               // YAML manifest
+  
+  // For Docker
+  dockerCompose         String?               // docker-compose.yml
+  
+  // For VPS
+  setupScript           String?               // Bash script
+  
+  // Auto-scaling config
+  minReplicas           Int                   @default(1)
+  maxReplicas           Int                   @default(3)
+  targetCpuUtilization  Int                   @default(70)
+  targetMemUtilization  Int                   @default(80)
+  
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  
+  @@index([type])
+  @@index([targetType])
+}
+
+model DeploymentLog {
+  id                    String                @id @default(cuid())
+  deploymentId          String?
+  deployment            Deployment?           @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  
+  buildJobId            String?
+  buildJob              BuildJob?             @relation(fields: [buildJobId], references: [id], onDelete: SetNull)
+  
+  level                 LogLevel              @default(INFO)
+  message               String                @db.Text
+  
+  stepName              String?
+  
+  timestamp             DateTime              @default(now())
+  
+  @@index([deploymentId])
+  @@index([buildJobId])
+  @@index([timestamp])
+}
+
+model DeploymentMetric {
+  id                    String                @id @default(cuid())
+  deploymentId          String
+  deployment            Deployment            @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  
+  metric                String                // cpu, memory, requests, etc.
+  value                 Float
+  unit                  String                // %, MB, ms, etc.
+  
+  timestamp             DateTime              @default(now())
+  
+  @@index([deploymentId])
+  @@index([metric])
+  @@index([timestamp])
+}
+
+// ENUMS
+enum DeploymentStatus {
+  PENDING
+  BUILDING
+  TESTING
+  SECURITY_SCANNING
+  DEPLOYING
+  VERIFYING
+  SUCCESS
+  FAILED
+  ROLLED_BACK
+}
+
+enum DeploymentTarget {
+  VPS
+  DOCKER
+  KUBERNETES
+  SERVERLESS
+}
+
+enum Environment {
+  DEVELOPMENT
+  STAGING
+  PRODUCTION
+}
+
+enum StageType {
+  INSTALL
+  TEST
+  BUILD
+  SECURITY_SCAN
+  CONTAINERIZE
+  DEPLOY
+  VERIFY
+  HEALTH_CHECK
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum BuildType {
+  DOCKER
+  BINARY
+  SERVERLESS
+}
+
+enum BuildStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum ArtifactType {
+  DOCKER_IMAGE
+  BINARY
+  ARCHIVE
+  SOURCE
+}
+
+enum InfraType {
+  NODE
+  NEXTJS
+  NESTJS
+  PYTHON
+  GO
+}
+
+enum HealthStatus {
+  UNKNOWN
+  HEALTHY
+  UNHEALTHY
+  DEGRADED
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}

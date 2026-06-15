@@ -1,0 +1,198 @@
+// Add to packages/backend/prisma/schema.prisma
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  description String?
+  logo      String?
+  website   String?
+  
+  ownerId   String
+  owner     User     @relation("OrgOwner", fields: [ownerId], references: [id])
+  
+  type      String   // OrganizationType enum
+  industry  String?
+  country   String?
+  active    Boolean  @default(true)
+  
+  settings  Json?
+  
+  members           Membership[]
+  workspaces        Workspace[]
+  invitations       Invitation[]
+  activityLogs      ActivityLog[]
+  sharedResources   SharedResource[]
+  presences         Presence[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([ownerId])
+  @@index([active])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  role      String   // OrganizationRole enum
+  joinedAt  DateTime?
+  active    Boolean  @default(true)
+  invitedBy String?
+  customPermissions Json?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  description String?
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  creatorId String
+  creator   User     @relation("WorkspaceCreator", fields: [creatorId], references: [id])
+  
+  active    Boolean  @default(true)
+  settings  Json?
+  
+  projects          WorkspaceProject[]
+  sharedResources   SharedResource[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([organizationId])
+  @@index([creatorId])
+}
+
+model WorkspaceProject {
+  id        String   @id @default(cuid())
+  name      String
+  description String?
+  
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  icon      String?
+  order     Int      @default(0)
+  metadata  Json?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([workspaceId])
+}
+
+model Invitation {
+  id        String   @id @default(cuid())
+  email     String
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  invitedById String
+  invitedBy   User     @relation(fields: [invitedById], references: [id])
+  
+  role      String   // OrganizationRole enum
+  token     String   @unique
+  accepted  Boolean  @default(false)
+  acceptedAt DateTime?
+  acceptedBy String?
+  expired   Boolean  @default(false)
+  expiresAt DateTime
+  
+  createdAt DateTime @default(now())
+  
+  @@index([email])
+  @@index([organizationId])
+  @@index([token])
+}
+
+model SharedResource {
+  id        String   @id @default(cuid())
+  resourceType String
+  resourceId String
+  
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  sharedBy  String
+  permissions Json
+  active    Boolean  @default(true)
+  metadata  Json?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([resourceType, resourceId, workspaceId])
+  @@index([workspaceId])
+  @@index([organizationId])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  workspaceId String?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  action    String
+  resourceType String
+  resourceId String?
+  resourceName String?
+  changes   Json?
+  metadata  Json?
+  
+  ipAddress String?
+  userAgent String?
+  
+  timestamp DateTime @default(now())
+  
+  @@index([organizationId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+model Presence {
+  id        String   @id @default(cuid())
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  workspaceId String?
+  userId    String
+  user      User     @relation("UserPresence", fields: [userId], references: [id], onDelete: Cascade)
+  
+  status    String   // ONLINE, AWAY, OFFLINE, TYPING
+  currentResource String?
+  lastActivityAt DateTime?
+  sessionId String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, organizationId, sessionId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+}

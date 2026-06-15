@@ -1,0 +1,214 @@
+// Add to packages/backend/prisma/schema.prisma
+
+model InfrastructureCluster {
+  id        String   @id @default(cuid())
+  name      String
+  region    String
+  cloudProvider String
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  kubernetesVersion String
+  nodeCount Int
+  nodeType  String
+  
+  networkConfig Json
+  status    String   // ClusterStatus enum
+  metadata  Json?
+  
+  kubernetesClusterId String?
+  createdBy String?
+  
+  services  ServiceInstance[]
+  scalingPolicies ScalingPolicy[]
+  configs   InfraConfig[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([region])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model ServiceInstance {
+  id        String   @id @default(cuid())
+  serviceName String
+  clusterName String
+  
+  clusterId String
+  cluster   InfrastructureCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  
+  status    String   // NodeStatus enum
+  replicas  Int
+  desiredReplicas Int
+  
+  containerConfig Json
+  healthCheck Json?
+  
+  kubernetesDeploymentId String?
+  metadata  Json?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([clusterId, serviceName])
+  @@index([clusterId])
+}
+
+model ScalingPolicy {
+  id        String   @id @default(cuid())
+  name      String
+  
+  clusterId String
+  cluster   InfrastructureCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  
+  strategy  String   // ScalingStrategy enum
+  targetService String
+  
+  minReplicas Int
+  maxReplicas Int
+  
+  rules     Json
+  active    Boolean  @default(true)
+  metadata  Json?
+  
+  scalingEvents ScalingEvent[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([clusterId])
+}
+
+model ScalingEvent {
+  id        String   @id @default(cuid())
+  
+  policyId  String
+  policy    ScalingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  
+  clusterId String
+  serviceName String
+  
+  previousReplicas Int
+  newReplicas Int
+  reason    String
+  
+  createdAt DateTime @default(now())
+}
+
+model InfraConfig {
+  id        String   @id @default(cuid())
+  name      String
+  environment String
+  
+  clusterId String
+  cluster   InfrastructureCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  
+  iaC       Json
+  secrets   Json
+  environmentVariables Json
+  
+  lastDeployedBy String?
+  lastDeployedAt DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([clusterId, environment])
+  @@index([clusterId])
+}
+
+model Deployment {
+  id        String   @id @default(cuid())
+  appId     String
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  status    String   // DeploymentStatus enum
+  deploymentNumber Int
+  
+  deployedBy String
+  deployedAt DateTime @default(now())
+  completedAt DateTime?
+  error     String?
+  
+  environment String
+  
+  previousDeploymentId String?
+  
+  regions   DeploymentRegion[]
+  pipeline  DeploymentPipeline?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([appId])
+  @@index([organizationId])
+}
+
+model DeploymentRegion {
+  id        String   @id @default(cuid())
+  
+  deploymentId String
+  deployment  Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  
+  region    String
+  status    String   // DeploymentStatus enum
+  metadata  Json?
+  
+  clusterId String?
+  deployedAt DateTime?
+  failedAt  DateTime?
+  failureReason String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([deploymentId, region])
+  @@index([deploymentId])
+  @@index([region])
+}
+
+model DeploymentPipeline {
+  id        String   @id @default(cuid())
+  name      String
+  appId     String
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  gitBranch String
+  stages    Json
+  
+  enabled   Boolean  @default(true)
+  webhookUrl String?
+  webhookSecret String?
+  
+  metadata  Json?
+  
+  deployments Deployment[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([appId])
+  @@index([organizationId])
+}
+
+model LoadBalancerRule {
+  id        String   @id @default(cuid())
+  name      String
+  appId     String
+  
+  rules     Json
+  healthCheck Json
+  
+  active    Boolean  @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([appId])
+}

@@ -1,0 +1,32 @@
+# monitoring/alerts/critical.alert.yml
+groups:
+  - name: critical_alerts
+    interval: 30s
+    rules:
+      - alert: DatabaseDown
+        expr: up{job="database"} == 0
+        for: 1m
+        annotations:
+          summary: "Database is down"
+          description: "Database has been unreachable for more than 1 minute"
+
+      - alert: HighErrorRate
+        expr: rate(http_errors_total[5m]) > 0.05
+        for: 5m
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate has exceeded 5% for more than 5 minutes"
+
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.9
+        for: 5m
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage has exceeded 90%"
+
+      - alert: DiskSpaceRunningOut
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1
+        for: 5m
+        annotations:
+          summary: "Disk space running out"
+          description: "Less than 10% disk space available"

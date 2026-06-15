@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "metrics"]
 }
 
 datasource db {
@@ -7,341 +8,330 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================================================
-// PHASES 1-8: Previous models (User, Chat, Agent, etc.)
-// ============================================================================
-// (All existing models from Phases 1-8 remain unchanged)
-
+// ============ USERS & AUTHENTICATION ============
 model User {
-  id            String        @id @default(cuid())
-  email         String        @unique @db.VarChar(255)
-  username      String        @unique @db.VarChar(50)
-  password      String        @db.Text
-  firstName     String?       @db.VarChar(100)
-  lastName      String?       @db.VarChar(100)
-  avatar        String?       @db.Text
-  bio           String?       @db.Text
-  phone         String?       @db.VarChar(20)
-  emailVerified Boolean       @default(false)
-  isActive      Boolean       @default(true)
-  lastLoginAt   DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  // Relations - Phases 3-8
-  userRoles      UserRole[]    @relation("UserRoles")
-  sessions       Session[]     @relation("UserSessions")
-  chats          Chat[]        @relation("UserChats")
-  agents         Agent[]       @relation("UserAgents")
-  repositories   Repository[]  @relation("UserRepositories")
-  apps           GeneratedApp[] @relation("UserApps")
-  securityEvents SecurityEvent[] @relation("UserSecurityEvents")
-
-  // Relations - Phase 9
-  testRuns       TestRun[]     @relation("UserTestRuns")
-  bugReports     BugReport[]   @relation("UserBugReports")
-  qaReports      QAReport[]    @relation("UserQAReports")
-
+  id                    String    @id @default(cuid())
+  email                 String    @unique
+  emailVerified         DateTime?
+  password              String    // Encrypted
+  firstName             String?
+  lastName              String?
+  avatar                String?
+  status                String    @default("active") // active, suspended, banned
+  mfaEnabled            Boolean   @default(false)
+  mfaSecret             String?   @db.VarChar(255)
+  lastLogin             DateTime?
+  lastLoginIP           String?
+  lastLoginUserAgent    String?
+  loginAttempts         Int       @default(0)
+  lockoutUntil          DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime? // Soft delete for GDPR
+  
+  // Relations
+  profile               UserProfile?
+  settings              UserSettings?
+  sessions              Session[]
+  auditLogs             AuditLog[]
+  subscriptions         Subscription[]
+  organizations         Organization[]
+  devices               Device[]
+  
+  // Indexes
   @@index([email])
-  @@index([username])
-  @@map("users")
+  @@index([status])
+  @@index([createdAt])
+  @@index([lastLogin])
+  @@fulltext([email, firstName, lastName]) // Full-text search
 }
 
-// (Previous models from Phases 3-8)
-
-// ============================================================================
-// PHASE 9: Testing Center System (NEW)
-// ============================================================================
-
-model TestSuite {
-  id            String   @id @default(cuid())
-  
-  name          String   @db.VarChar(255)
-  description   String?  @db.Text
-  
-  // Suite configuration
-  suiteType     String   @db.VarChar(50) // "unit", "integration", "e2e", "api", "load"
-  targetModule  String?  @db.VarChar(100) // e.g., "auth", "chat", "agents"
-  
-  // Test cases
-  testCaseIds   String[] @default([])
-  testCount     Int      @default(0)
-  
-  // Status
-  isActive      Boolean  @default(true)
-  isAutomated   Boolean  @default(false)
-  
-  // Metadata
-  tags          String[] @default([])
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relations
-  testCases     TestCase[] @relation("SuiteTestCases")
-  testRuns      TestRun[] @relation("SuiteRuns")
-
-  @@index([suiteType])
-  @@index([targetModule])
-  @@index([isActive])
-  @@map("test_suites")
-}
-
-model TestCase {
-  id            String   @id @default(cuid())
-  suiteId       String
-  
-  // Test details
-  name          String   @db.VarChar(255)
-  description   String?  @db.Text
-  testCode      String   @db.Text // The actual test code/config
-  
-  // Test classification
-  caseType      String   @db.VarChar(50) // "happy_path", "error_case", "edge_case", "regression"
-  
-  // Expected outcomes
-  expectedResult Json    // Expected status, assertions, etc.
-  
-  // Generation metadata
-  isAIGenerated Boolean  @default(false)
-  generatedFrom String?  @db.VarChar(255) // What it was generated from
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relations
-  suite         TestSuite @relation("SuiteTestCases", fields: [suiteId], references: [id], onDelete: Cascade)
-  results       TestResult[] @relation("CaseResults")
-
-  @@index([suiteId])
-  @@index([caseType])
-  @@index([isAIGenerated])
-  @@map("test_cases")
-}
-
-model TestRun {
-  id            String   @id @default(cuid())
-  userId        String
-  suiteId       String
-  
-  // Run configuration
-  runType       String   @db.VarChar(50) // "manual", "scheduled", "ci_cd"
-  parallelCount Int      @default(1) // Number of parallel workers
-  
-  // Execution
-  status        String   @db.VarChar(50) @default("running") // running, completed, failed, aborted
-  startedAt     DateTime @default(now())
-  completedAt   DateTime?
-  durationMs    Int?
-  
-  // Results
-  totalTests    Int      @default(0)
-  passedTests   Int      @default(0)
-  failedTests   Int      @default(0)
-  skippedTests  Int      @default(0)
-  
-  // Metadata
-  environment   String?  @db.VarChar(50) // "staging", "production"
-  gitCommit     String?  @db.VarChar(40)
-  branch        String?  @db.VarChar(100)
-  
-  createdAt     DateTime @default(now())
-
-  // Relations
-  user          User     @relation("UserTestRuns", fields: [userId], references: [id], onDelete: Cascade)
-  suite         TestSuite @relation("SuiteRuns", fields: [suiteId], references: [id], onDelete: Cascade)
-  results       TestResult[] @relation("RunResults")
+model UserProfile {
+  id                String  @id @default(cuid())
+  userId            String  @unique
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio               String?
+  company           String?
+  location          String?
+  website           String?
+  timezone          String?
+  language          String  @default("en")
+  twoFactorEnabled  Boolean @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([userId])
-  @@index([suiteId])
-  @@index([status])
-  @@index([startedAt])
-  @@map("test_runs")
 }
 
-model TestResult {
-  id            String   @id @default(cuid())
-  runId         String
-  caseId        String
-  
-  // Result
-  status        String   @db.VarChar(50) // "passed", "failed", "skipped", "error"
-  
-  // Details
-  errorMessage  String?  @db.Text
-  stackTrace    String?  @db.Text
-  duration      Int?     // Duration in ms
-  
-  // Logs
-  logs          String?  @db.Text
-  stdout        String?  @db.Text
-  stderr        String?  @db.Text
-  
-  // Assertions
-  assertions    Json?    // Details about assertions
-  
-  // Screenshots/artifacts
-  artifacts     String[] @default([]) // File paths
-  
-  createdAt     DateTime @default(now())
-
-  // Relations
-  run           TestRun @relation("RunResults", fields: [runId], references: [id], onDelete: Cascade)
-  testCase      TestCase @relation("CaseResults", fields: [caseId], references: [id], onDelete: Cascade)
-
-  @@index([runId])
-  @@index([caseId])
-  @@index([status])
-  @@map("test_results")
-}
-
-model BugReport {
-  id            String   @id @default(cuid())
-  userId        String
-  
-  // Bug information
-  title         String   @db.VarChar(255)
-  description   String   @db.Text
-  
-  // Classification
-  severity      String   @db.VarChar(50) // "critical", "high", "medium", "low"
-  status        String   @db.VarChar(50) @default("open") // "open", "investigating", "fixed", "wontfix"
-  
-  // Source
-  source        String   @db.VarChar(50) // "automated", "manual", "user_report"
-  relatedTestId String?  // If from test failure
-  
-  // Details
-  reproducingSteps String? @db.Text
-  expectedBehavior String? @db.Text
-  actualBehavior String?  @db.Text
-  
-  // Environment
-  environment   String?  @db.VarChar(50)
-  affectedModule String?  @db.VarChar(100)
-  
-  // AI-Generated
-  suggestedFix  String?  @db.Text // AI-suggested fix
-  fixConfidence Float?   // 0-1: confidence of suggested fix
-  
-  // Tracking
-  assignedTo    String?  @db.VarChar(100)
-  priority      Int      @default(50) // 1-100
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  closedAt      DateTime?
-
-  // Relations
-  user          User     @relation("UserBugReports", fields: [userId], references: [id], onDelete: Cascade)
+model UserSettings {
+  id                String  @id @default(cuid())
+  userId            String  @unique
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailNotifications Boolean @default(true)
+  smsNotifications  Boolean @default(false)
+  pushNotifications Boolean @default(true)
+  theme             String  @default("light")
+  dataExportFormat  String  @default("json")
+  privacyLevel      String  @default("private") // private, friends, public
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([userId])
-  @@index([severity])
-  @@index([status])
-  @@index([source])
-  @@map("bug_reports")
 }
 
-model QAReport {
-  id            String   @id @default(cuid())
-  userId        String
-  
-  // Report information
-  name          String   @db.VarChar(255)
-  reportType    String   @db.VarChar(50) // "daily", "weekly", "release", "custom"
-  
-  // Metrics
-  totalTests    Int      @default(0)
-  passRate      Float    // 0-100
-  failureRate   Float    // 0-100
-  skipRate      Float    // 0-100
-  flakiness     Float    // % of flaky tests
-  
-  // Coverage
-  lineCoverage  Float?   // %
-  branchCoverage Float?  // %
-  functionCoverage Float? // %
-  
-  // System Health
-  systemHealthScore Int?  // 0-100
-  apiAvailability Float? // %
-  performanceScore Int?   // 0-100
-  securityScore Int?     // 0-100
-  
-  // Findings
-  findings      Json?    // Structured findings/recommendations
-  hotspots      String[] @default([]) // Problematic areas
-  regressions   Int      @default(0) // Regression count
-  
-  // Dates
-  periodStart   DateTime
-  periodEnd     DateTime
-  
-  createdAt     DateTime @default(now())
-
-  // Relations
-  user          User     @relation("UserQAReports", fields: [userId], references: [id], onDelete: Cascade)
+model Session {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token             String  @unique // Hashed
+  deviceFingerprint String?
+  ipAddress         String
+  userAgent         String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  rotationRequired  Boolean @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([userId])
-  @@index([reportType])
-  @@index([periodStart])
-  @@map("qa_reports")
+  @@index([expiresAt])
+  @@index([ipAddress])
 }
 
-model CoverageMetric {
-  id            String   @id @default(cuid())
-  
-  // Coverage details
-  filePath      String   @db.VarChar(500)
-  linesCovered  Int
-  linesTotal    Int
-  linePercentage Float
-  
-  branchesCovered Int?
-  branchesTotal Int?
-  branchPercentage Float?
-  
-  functionsCovered Int?
-  functionsTotal Int?
-  functionPercentage Float?
-  
-  // Metadata
-  lastUpdated   DateTime @updatedAt
-  gitCommit     String?  @db.VarChar(40)
-  
-  createdAt     DateTime @default(now())
+model Device {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  type              String  // mobile, desktop, tablet
+  fingerprint       String  @unique
+  lastSeenAt        DateTime
+  trustedAt         DateTime?
+  createdAt         DateTime @default(now())
 
-  @@unique([filePath, gitCommit])
-  @@index([linePercentage])
-  @@index([lastUpdated])
-  @@map("coverage_metrics")
+  @@index([userId])
+  @@index([fingerprint])
 }
 
-model TestMetric {
-  id            String   @id @default(cuid())
-  
-  // Daily metrics
-  date          DateTime @db.Date
-  
-  // Counts
-  totalTests    Int
-  passedTests   Int
-  failedTests   Int
-  flakyTests    Int
-  
-  // Performance
-  averageDuration Float? // ms
-  medianDuration Float?  // ms
-  p95Duration   Float?   // ms
-  
-  // Trends
-  passRate      Float    // %
-  failureRate   Float    // %
-  
-  createdAt     DateTime @default(now())
+// ============ ORGANIZATIONS & TEAMS ============
+model Organization {
+  id                String  @id @default(cuid())
+  ownerId           String
+  owner             User    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  name              String
+  slug              String  @unique
+  description       String?
+  logo              String?
+  status            String  @default("active")
+  tier              String  @default("free") // free, pro, enterprise
+  members           OrganizationMember[]
+  subscriptions     Subscription[]
+  apiKeys           ApiKey[]
+  auditLogs         AuditLog[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  @@unique([date])
-  @@index([date])
-  @@index([passRate])
-  @@map("test_metrics")
+  @@index([ownerId])
+  @@index([slug])
+}
+
+model OrganizationMember {
+  id              String  @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId          String
+  role            String  @default("member") // owner, admin, member
+  joinedAt        DateTime @default(now())
+  permissions     Json    @default("{}")
+  
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+}
+
+// ============ SUBSCRIPTIONS & BILLING ============
+model Subscription {
+  id                String  @id @default(cuid())
+  userId            String?
+  user              User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan              String  // free, pro, enterprise
+  status            String  @default("active") // active, canceled, paused
+  currentPeriodStart DateTime
+  currentPeriodEnd  DateTime
+  canceledAt        DateTime?
+  stripeSubscriptionId String? @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model Invoice {
+  id                String  @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation("Invoices", fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptionId    String?
+  amount            BigInt  // In cents
+  currency          String  @default("USD")
+  status            String  @default("pending") // pending, paid, failed
+  paidAt            DateTime?
+  dueAt             DateTime
+  stripeInvoiceId   String? @unique
+  pdf               String? // URL to PDF
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+// ============ API KEYS & WEBHOOKS ============
+model ApiKey {
+  id                String  @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name              String
+  key               String  @unique @db.VarChar(255)
+  secret            String  @db.VarChar(255)
+  lastUsedAt        DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([key])
+}
+
+model Webhook {
+  id                String  @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  url               String
+  events            String[] // Events to listen for
+  secret            String
+  active            Boolean @default(true)
+  lastTriggeredAt   DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([active])
+}
+
+// ============ AUDIT & COMPLIANCE ============
+model AuditLog {
+  id                String  @id @default(cuid())
+  userId            String?
+  user              User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  action            String
+  resourceType      String
+  resourceId        String
+  changes           Json    @default("{}")
+  ipAddress         String
+  userAgent         String
+  checksum          String  @db.VarChar(255) // For immutability verification
+  status            String  @default("success")
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([action])
+  @@index([resourceType])
+  @@index([createdAt])
+}
+
+model DataRetention {
+  id                String  @id @default(cuid())
+  organizationId    String  @unique
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  retentionDays     Int     @default(90)
+  autoDelete        Boolean @default(true)
+  lastRunAt         DateTime?
+  nextRunAt         DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// ============ ANALYTICS & MONITORING ============
+model AnalyticsEvent {
+  id                String  @id @default(cuid())
+  organizationId    String?
+  userId            String?
+  event             String
+  properties        Json    @default("{}")
+  timestamp         DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([event])
+  @@index([timestamp])
+}
+
+model SystemLog {
+  id                String  @id @default(cuid())
+  level             String  // info, warning, error, critical
+  service           String
+  message           String
+  context           Json    @default("{}")
+  timestamp         DateTime @default(now())
+
+  @@index([level])
+  @@index([service])
+  @@index([timestamp])
+}
+
+model HealthCheckLog {
+  id                String  @id @default(cuid())
+  component         String
+  status            String  // healthy, degraded, unhealthy
+  responseTime      Int     // ms
+  errors            String?
+  timestamp         DateTime @default(now())
+
+  @@index([component])
+  @@index([status])
+  @@index([timestamp])
+}
+
+// ============ BACKUPS & DISASTER RECOVERY ============
+model Backup {
+  id                String  @id @default(cuid())
+  backupId          String  @unique
+  size              BigInt
+  type              String  // full, incremental
+  status            String  @default("completed")
+  location          String
+  checksum          String
+  restoredAt        DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([status])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model Deployment {
+  id                String  @id @default(cuid())
+  version           String
+  commit            String
+  status            String  // pending, in-progress, successful, failed, rolled-back
+  environment       String  // development, staging, production
+  deployedBy        String?
+  startedAt         DateTime
+  completedAt       DateTime?
+  rolledBackAt      DateTime?
+  logs              String?
+  createdAt         DateTime @default(now())
+
+  @@index([status])
+  @@index([environment])
+  @@index([version])
 }

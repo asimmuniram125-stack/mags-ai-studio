@@ -1,0 +1,187 @@
+// ============ LAUNCH & RELEASE ============
+model Release {
+  id                    String   @id @default(cuid())
+  version               String   @unique
+  name                  String
+  description           String?
+  status                String   @default("draft") // draft, beta, staging, production
+  phasePercentage       Int      @default(0) // 0-100
+  features              String[] @default([])
+  changes               String[] @default([])
+  breakingChanges       String[] @default([])
+  migrationRequired     Boolean  @default(false)
+  rollbackUrl           String?
+  scheduledAt           DateTime?
+  publishedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  changelogs            Changelog[]
+
+  @@index([status])
+  @@index([publishedAt])
+}
+
+model Changelog {
+  id                String   @id @default(cuid())
+  releaseId         String
+  release           Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  action            String
+  description       String
+  category          String   // feature, fix, improvement, security, breaking
+  impact            String   // low, medium, high
+  migration         String?
+  timestamp         DateTime @default(now())
+
+  @@index([releaseId])
+  @@index([category])
+}
+
+// ============ FEATURE FLAGS ============
+model FeatureFlag {
+  id                    String   @id @default(cuid())
+  key                   String   @unique
+  name                  String
+  description           String?
+  enabled               Boolean  @default(false)
+  rolloutPercentage     Int      @default(0)
+  targetOrganizations   String[] @default([])
+  targetUsers           String[] @default([])
+  variants              FeatureFlagVariant[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([key])
+}
+
+model FeatureFlagVariant {
+  id                String   @id @default(cuid())
+  flagId            String
+  flag              FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  key               String
+  percentage        Int
+  value             Json
+  createdAt         DateTime @default(now())
+
+  @@unique([flagId, key])
+  @@index([flagId])
+}
+
+// ============ ONBOARDING ============
+model UserOnboarding {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  completedSteps    String[] @default([])
+  currentStep       String?
+  skippedSteps      String[] @default([])
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([completedAt])
+}
+
+model ProductTour {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tourKey           String
+  completedAt       DateTime
+  skipped           Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  @@unique([userId, tourKey])
+  @@index([userId])
+}
+
+// ============ DOCUMENTATION ============
+model DocumentationPage {
+  id                String   @id @default(cuid())
+  slug              String   @unique
+  title             String
+  content           String   @db.Text
+  category          String
+  order             Int      @default(0)
+  published         Boolean  @default(false)
+  authors           String[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([slug])
+  @@index([category])
+  @@index([published])
+}
+
+// ============ FEEDBACK ============
+model Feedback {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String   // bug, feature-request, improvement, other
+  title             String
+  description       String   @db.Text
+  metadata          Json     @default("{}")
+  status            String   @default("open")
+  priority          String   @default("medium")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+}
+
+// ============ ADOPTION ANALYTICS ============
+model FeatureAdoption {
+  id                String   @id @default(cuid())
+  organizationId    String?
+  featureName       String
+  usageCount        Int      @default(0)
+  uniqueUsers       Int      @default(0)
+  adoptionDate      DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([featureName])
+  @@index([adoptionDate])
+}
+
+model OnboardingMetrics {
+  id                String   @id @default(cuid())
+  organizationId    String?
+  totalUsers        Int      @default(0)
+  completedUsers    Int      @default(0)
+  abandonedUsers    Int      @default(0)
+  averageTimeSpent  Int      @default(0) // in seconds
+  reportDate        DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([reportDate])
+}
+
+// ============ PLATFORM STATUS ============
+model PlatformStatus {
+  id                String   @id @default(cuid())
+  component         String
+  status            String   // operational, degraded, down
+  details           String?
+  timestamp         DateTime @default(now())
+
+  @@index([component])
+  @@index([timestamp])
+}
+
+model LaunchChecklist {
+  id                String   @id @default(cuid())
+  item              String
+  completed         Boolean  @default(false)
+  category          String
+  priority          String
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+
+  @@index([category])
+  @@index([completed])
+}
